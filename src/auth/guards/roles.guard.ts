@@ -33,9 +33,6 @@ export class RolesGuard implements CanActivate {
     // Preia metadatele 'roles' atașate metodei (handler-ului) curente
     // Dacă ruta nu are roluri specificate, requiredRoles va fi undefined
 
-    if (!requiredRoles) return true;
-    // Dacă nu există roluri cerute, permit accesul oricui (nu restricționează)
-
     const request = context
       .switchToHttp()
       .getRequest<Request & { user?: AuthenticatedUser }>();

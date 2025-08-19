@@ -24,6 +24,7 @@ model User {
   products  Product[]
   messages  Message[] @relation("UserMessages")
   favorites Favorite[]
+  refreshTokens RefreshToken[] 
   createdAt DateTime  @default(now())
 }
 
@@ -68,4 +69,14 @@ enum Role {
   USER
   ADMIN
 }
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+}
+
 
