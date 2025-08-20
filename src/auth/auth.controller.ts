@@ -68,8 +68,10 @@ export class AuthController {
   // ======================
   @Get('profile')
   @UseGuards(JwtAuthGuard)
-  async profile(@Req() req: { user: { sub: string } }): Promise<AuthUserDto> {
-    return this.authService.getProfile(req.user.sub);
+  async profile(
+    @Req() req: { user: { userId: string } },
+  ): Promise<AuthUserDto> {
+    return this.authService.getProfile(req.user.userId); // folosim userId
   }
 
   // ======================
@@ -78,10 +80,11 @@ export class AuthController {
   @Patch('update-profile')
   @UseGuards(JwtAuthGuard)
   async updateProfile(
-    @Req() req: { user: { sub: string } },
+    @Req() req: { user: { userId: string } },
     @Body() body: UpdateProfileDto,
   ): Promise<AuthUserDto> {
-    return this.authService.updateProfile(req.user.sub, body);
+    // console.log(req);
+    return this.authService.updateProfile(req.user.userId, body);
   }
 
   // ======================

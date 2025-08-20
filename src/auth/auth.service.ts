@@ -1,6 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unsafe-assignment */
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-unsafe-call */
 import {
   Injectable, // Decorator to mark this class as injectable in NestJS
   UnauthorizedException, // Exception for 401 responses
@@ -11,7 +8,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service'; // Prisma DB service
 import * as bcrypt from 'bcrypt'; // Library to hash and compare passwords
 import { JwtService } from '@nestjs/jwt'; // JWT handling service
-import sgMail from '@sendgrid/mail'; // SendGrid mail service
+import * as sgMail from '@sendgrid/mail'; // SendGrid mail service
 
 // ======================
 // Interfaces
@@ -79,7 +76,12 @@ export class AuthService {
     password: string,
   ): Promise<{ user: AuthUser } & AuthTokens> {
     const hashedPassword = await bcrypt.hash(password, 10); // Hash password
-
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email },
+    });
+    if (existingUser) {
+      throw new BadRequestException('Email already registered');
+    }
     const user = await this.prisma.user.create({
       data: { name, email, password: hashedPassword }, // Create user in DB
     });
@@ -191,10 +193,10 @@ export class AuthService {
     userId: string,
     data: { name?: string; email?: string },
   ): Promise<AuthUser> {
-    const updateData: Record<string, string> = {}; // Prepare update object
+    const updateData: Partial<{ name: string; email: string }> = {}; // Prepare update object
     if (data.name) updateData.name = data.name; // Update name if provided
     if (data.email) updateData.email = data.email; // Update email if provided
-
+    console.log('updated data', updateData);
     const user = await this.prisma.user.update({
       where: { id: userId }, // Select user
       data: updateData, // Update fields
