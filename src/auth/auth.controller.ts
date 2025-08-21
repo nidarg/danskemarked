@@ -93,11 +93,11 @@ export class AuthController {
   @Patch('update-password')
   @UseGuards(JwtAuthGuard)
   async updatePassword(
-    @Req() req: { user: { sub: string } },
+    @Req() req: { user: { userId: string } },
     @Body() body: UpdatePasswordDto,
   ): Promise<{ message: string }> {
     return this.authService.updatePassword(
-      req.user.sub,
+      req.user.userId,
       body.oldPassword,
       body.newPassword,
     );
