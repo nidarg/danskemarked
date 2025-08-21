@@ -17,6 +17,12 @@ This project is an **authentication system** built with **NestJS** and **Prisma*
 
 ---
 
+## 📬 Postman Collection
+
+You can test all authentication endpoints directly via our Postman workspace:
+
+🔗 [Open Authentication Collection in Postman](https://winter-moon-399424.postman.co/workspace/danskemarked~b3290832-af7e-45a8-b1c8-07ba6da62651/collection/3718363-bc6ae3cb-f0f2-45cb-8744-bd3aff132bf6?action=share&source=copy-link&creator=3718363)
+
 ## 📦 Installation
 
 Clone the repository and install dependencies:
