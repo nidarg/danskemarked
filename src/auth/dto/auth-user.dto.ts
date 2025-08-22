@@ -1,7 +1,13 @@
-// DTO pentru userul returnat în răspuns (fără parolă)
 export class AuthUserDto {
   id: string;
   name: string;
   email: string;
-  role: 'USER' | 'ADMIN';
+  role: 'ADMIN' | 'USER';
+
+  accountType: 'INDIVIDUAL' | 'COMPANY';
+
+  companyName?: string;
+  vatNumber?: string;
+  address?: string;
+  phone?: string;
 }

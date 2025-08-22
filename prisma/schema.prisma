@@ -15,68 +15,162 @@ generator client {
   provider = "prisma-client-js"
 }
 
-model User {
-  id        String    @id @default(uuid())
-  name      String
-  email     String    @unique
-  password  String
-  role      Role      @default(USER)
-  products  Product[]
-  messages  Message[] @relation("UserMessages")
-  favorites Favorite[]
-  refreshTokens RefreshToken[] 
-  createdAt DateTime  @default(now())
-}
-
-model Product {
-  id          String    @id @default(uuid())
-  title       String
-  description String
-  price       Float
-  images      String[]
-  category    Category  @relation(fields: [categoryId], references: [id])
-  categoryId  String
-  seller      User      @relation(fields: [sellerId], references: [id])
-  sellerId    String
-  favorites   Favorite[]
-  createdAt   DateTime  @default(now())
-}
-
-model Category {
-  id       String    @id @default(uuid())
-  name     String    @unique
-  products Product[]
-}
-
-model Favorite {
-  id        String   @id @default(uuid())
-  user      User     @relation(fields: [userId], references: [id])
-  userId    String
-  product   Product  @relation(fields: [productId], references: [id])
-  productId String
-}
-
-model Message {
-  id         String   @id @default(uuid())
-  content    String
-  sender     User     @relation("UserMessages", fields: [senderId], references: [id])
-  senderId   String
-  receiverId String
-  createdAt  DateTime @default(now())
-}
+// ===========================
+// ENUMS
+// ===========================
 
 enum Role {
-  USER
-  ADMIN
+  USER    // utilizator normal (INDIVIDUAL sau COMPANY)
+  ADMIN   // administrator platformă
 }
 
-model RefreshToken {
-  id        String   @id @default(uuid())
-  token     String   @unique
+enum AccountType {
+  INDIVIDUAL  // persoană fizică, cumpărător
+  COMPANY     // companie, poate posta anunțuri
+}
+
+enum Plan {
+  FREE
+  GOLD
+  PREMIUM
+}
+
+enum ProductStatus {
+  ACTIVE      // produs activ, vizibil
+  INACTIVE    // produs dezactivat
+  SOLD        // produs vândut
+}
+
+// ===========================
+// USER
+// ===========================
+
+model User {
+  id           String       @id @default(uuid())       // ID unic al userului
+  name         String                              // Nume complet sau nume companie
+  email        String       @unique                 // Email, unic
+  password     String                              // Parolă hash-uită
+  role         Role         @default(USER)         // Rol: USER sau ADMIN
+  accountType  AccountType  @default(INDIVIDUAL)   // Tip cont: INDIVIDUAL sau COMPANY
+
+  // Date companie (doar dacă accountType = COMPANY)
+  companyName  String?                             // Numele firmei
+  vatNumber    String?                             // CUI / VAT
+  address      String?                             // Adresă firmă
+  phone        String?                             // Telefon contact
+
+  // Relații
+  products      Product[]        // Produse postate (numai companii)
+  messages      Message[]        @relation("UserMessages") // Mesaje trimise/primite
+  favorites     Favorite[]       // Produse favorite
+  refreshTokens RefreshToken[]   // Refresh token-uri JWT
+  subscriptions Subscription[]   // Abonamente (pentru companii)
+  createdAt     DateTime         @default(now()) // Data înregistrării
+
+  ProductView ProductView[]
+}
+
+// ===========================
+// PRODUCT / AD
+// ===========================
+
+model Product {
+  id          String        @id @default(uuid())   // ID unic produs
+  title       String                              // Titlul produsului
+  description String                              // Descriere detaliată
+  price       Float                               // Preț
+  images      String[]                            // Array cu URL-uri imagini
+
+  category    Category      @relation(fields: [categoryId], references: [id])
+  categoryId  String                                // Legătură către categorie
+
+  seller      User          @relation(fields: [sellerId], references: [id])
+  sellerId    String                                // ID-ul companiei care postează produsul
+
+  favorites   Favorite[]                           // Cine a favorizat produsul
+
+  status      ProductStatus @default(ACTIVE)       // Status: ACTIVE / INACTIVE / SOLD
+  isPremium   Boolean       @default(false)        // Featured / Top-of-list
+
+  createdAt   DateTime      @default(now())        // Data creării
+
+  // Statistici pentru dashboard
+  views       ProductView[]
+}
+
+// ===========================
+// CATEGORY
+// ===========================
+
+model Category {
+  id       String    @id @default(uuid())   // ID unic categorie
+  name     String    @unique               // Nume categorie (ex: Auto, Imobiliare)
+  products Product[]                        // Produse asociate
+}
+
+// ===========================
+// FAVORITE
+// ===========================
+
+model Favorite {
+  id        String   @id @default(uuid())    // ID unic favorite
   user      User     @relation(fields: [userId], references: [id])
-  userId    String
-  createdAt DateTime @default(now())
-  expiresAt DateTime
+  userId    String                              // User care a salvat produsul
+  product   Product  @relation(fields: [productId], references: [id])
+  productId String                              // Produs favorit
+}
+
+// ===========================
+// MESSAGE
+// ===========================
+
+model Message {
+  id             String   @id @default(uuid()) // ID unic mesaj
+  conversationId String                     // ID thread / chat
+  content        String                     // Text mesaj
+  sender         User     @relation("UserMessages", fields: [senderId], references: [id])
+  senderId       String                     // ID expeditor
+  receiverId     String                     // ID destinatar
+  createdAt      DateTime @default(now())   // Data și ora mesajului
+}
+
+// ===========================
+// REFRESH TOKEN
+// ===========================
+
+model RefreshToken {
+  id        String   @id @default(uuid())    // ID unic token
+  token     String   @unique                 // Token JWT
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String                              // User căruia îi aparține token-ul
+  createdAt DateTime @default(now())          // Data creării
+  expiresAt DateTime                          // Data expirării
+}
+
+// ===========================
+// SUBSCRIPTION / ABONAMENTE
+// ===========================
+
+model Subscription {
+  id         String   @id @default(uuid())    // ID unic abonament
+  user       User     @relation(fields: [userId], references: [id])
+  userId     String                              // Compania care are abonament
+  plan       Plan     @default(FREE)            // Tip abonament: FREE / GOLD / PREMIUM
+  startDate  DateTime @default(now())           // Data începerii
+  endDate    DateTime?                          // Data expirării (optional)
+}
+
+// ===========================
+// PRODUCT VIEW (STATISTICI)
+// ===========================
+
+model ProductView {
+  id        String   @id @default(uuid())    // ID vizualizare
+  product   Product  @relation(fields: [productId], references: [id])
+  productId String                             // Produs vizualizat
+  user      User?    @relation(fields: [userId], references: [id]) // Cine a vizualizat (optional anonim)
+  userId    String?
+  createdAt DateTime @default(now())          // Data vizualizării
 }
 
 

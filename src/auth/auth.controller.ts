@@ -21,61 +21,69 @@ import { JwtAuthGuard } from './guards/jwt-auth-guard';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) {}
+  constructor(private readonly authService: AuthService) {}
 
   // ======================
-  // Register
+  // Register new user
   // ======================
   @Post('register')
-  async register(@Body() registerDto: RegisterDto): Promise<AuthResponseDto> {
-    const { name, email, password } = registerDto;
-    return this.authService.register(name, email, password);
+  async register(
+    @Body() registerDto: RegisterDto,
+  ): Promise<AuthResponseDto & { refresh_token: string }> {
+    // Apelează serviciul AuthService.register cu DTO-ul complet
+    return this.authService.register(registerDto);
   }
 
   // ======================
   // Login
   // ======================
   @Post('login')
-  async login(@Body() loginDto: LoginDto): Promise<AuthResponseDto> {
-    const { email, password } = loginDto;
-    return this.authService.login(email, password);
+  async login(
+    @Body() loginDto: LoginDto,
+  ): Promise<AuthResponseDto & { refresh_token: string }> {
+    // Apelează serviciul AuthService.login cu DTO-ul complet
+    return this.authService.login(loginDto);
   }
 
   // ======================
-  // Refresh Token
+  // Refresh access token
   // ======================
   @Post('refresh-token')
   async refreshToken(
-    @Body() body: RefreshTokenDto,
+    @Body() dto: RefreshTokenDto,
   ): Promise<{ access_token: string }> {
-    return this.authService.refreshToken(body.refreshToken);
+    // Primește refresh token și returnează un nou access token
+    return this.authService.refreshToken(dto);
   }
 
   // ======================
   // Logout
   // ======================
   @Post('logout')
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard) // Protejat cu JWT
   async logout(
-    @Req() req: { user: { sub: string } }, // tipăm corect `req`
-    @Body() body: RefreshTokenDto,
+    @Req() req: { user: { sub: string } }, // User ID din JWT
+    @Body() dto: RefreshTokenDto,
   ): Promise<{ message: string }> {
-    return this.authService.logout(req.user.sub, body.refreshToken);
+    // Șterge refresh token-ul din DB
+    return this.authService.logout(req.user.sub, dto.refreshToken);
   }
 
   // ======================
-  // Profile
+  // Get user profile
   // ======================
   @Get('profile')
   @UseGuards(JwtAuthGuard)
   async profile(
     @Req() req: { user: { userId: string } },
   ): Promise<AuthUserDto> {
-    return this.authService.getProfile(req.user.userId); // folosim userId
+    console.log(req.user);
+    const user = await this.authService.getProfile(req.user.userId);
+    return user;
   }
 
   // ======================
-  // Update Profile
+  // Update profile
   // ======================
   @Patch('update-profile')
   @UseGuards(JwtAuthGuard)
@@ -83,12 +91,12 @@ export class AuthController {
     @Req() req: { user: { userId: string } },
     @Body() body: UpdateProfileDto,
   ): Promise<AuthUserDto> {
-    // console.log(req);
+    // Actualizează profile-ul userului
     return this.authService.updateProfile(req.user.userId, body);
   }
 
   // ======================
-  // Update Password
+  // Update password
   // ======================
   @Patch('update-password')
   @UseGuards(JwtAuthGuard)
@@ -96,30 +104,29 @@ export class AuthController {
     @Req() req: { user: { userId: string } },
     @Body() body: UpdatePasswordDto,
   ): Promise<{ message: string }> {
-    return this.authService.updatePassword(
-      req.user.userId,
-      body.oldPassword,
-      body.newPassword,
-    );
+    // Actualizează parola userului logat
+    return this.authService.updatePassword(req.user.userId, body);
   }
 
   // ======================
-  // Forgot Password
+  // Forgot password
   // ======================
   @Post('forgot-password')
   async forgotPassword(
     @Body() dto: ForgotPasswordDto,
   ): Promise<{ message: string }> {
-    return this.authService.forgotPassword(dto.email);
+    // Trimite email pentru resetare parola
+    return this.authService.forgotPassword(dto);
   }
 
   // ======================
-  // Reset Password
+  // Reset password
   // ======================
   @Post('reset-password')
   async resetPassword(
-    @Body() body: ResetPasswordDto,
+    @Body() dto: ResetPasswordDto,
   ): Promise<{ message: string }> {
-    return this.authService.resetPassword(body.token, body.newPassword);
+    // Resetează parola cu token-ul primit
+    return this.authService.resetPassword(dto);
   }
 }

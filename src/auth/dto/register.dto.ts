@@ -1,14 +1,32 @@
-// register.dto.ts
-import { IsEmail, IsNotEmpty, MinLength } from 'class-validator';
+import { IsEmail, IsEnum, IsOptional, IsString } from 'class-validator';
 
 export class RegisterDto {
-  @IsNotEmpty()
+  @IsString()
   name: string;
 
   @IsEmail()
   email: string;
 
-  @IsNotEmpty()
-  @MinLength(6)
+  @IsString()
   password: string;
+
+  @IsEnum(['INDIVIDUAL', 'COMPANY'])
+  accountType: 'INDIVIDUAL' | 'COMPANY';
+
+  // Only required if accountType = COMPANY
+  @IsOptional()
+  @IsString()
+  companyName?: string;
+
+  @IsOptional()
+  @IsString()
+  vatNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  address?: string;
+
+  @IsOptional()
+  @IsString()
+  phone?: string;
 }

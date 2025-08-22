@@ -1,10 +1,8 @@
 // ==== Mock SendGrid ====
 jest.mock('@sendgrid/mail', () => ({
   __esModule: true,
-  default: {
-    setApiKey: jest.fn(),
-    send: jest.fn().mockResolvedValue({}),
-  },
+  setApiKey: jest.fn(),
+  end: jest.fn().mockResolvedValue({}),
 }));
 
 // import * as sgMail from '@sendgrid/mail'; // import după mock
@@ -83,14 +81,16 @@ describe('AuthService', () => {
       email: 'john@test.com',
       role: 'USER',
       password: hashed,
+      accountType: 'INDIVIDUAL',
     });
     mockPrisma.refreshToken.create.mockResolvedValue({ token: 'signed-jwt' });
 
-    const result = await service.register(
-      'John',
-      'john@test.com',
-      'password123',
-    );
+    const result = await service.register({
+      name: 'John',
+      email: 'john@test.com',
+      password: 'password123',
+      accountType: 'INDIVIDUAL',
+    });
 
     expect(result.user.email).toBe('john@test.com');
     expect(result).toHaveProperty('access_token');
@@ -110,7 +110,10 @@ describe('AuthService', () => {
       password: hashed,
     });
 
-    const result = await service.login('john@test.com', 'password123');
+    const result = await service.login({
+      email: 'john@test.com',
+      password: 'password123',
+    });
 
     expect(result.user.name).toBe('John');
     expect(result.access_token).toBe('signed-jwt');
@@ -119,9 +122,9 @@ describe('AuthService', () => {
   it('should throw UnauthorizedException on invalid login', async () => {
     mockPrisma.user.findUnique.mockResolvedValue(null);
 
-    await expect(service.login('wrong@test.com', 'password')).rejects.toThrow(
-      UnauthorizedException,
-    );
+    await expect(
+      service.login({ email: 'wrong@test.com', password: 'password' }),
+    ).rejects.toThrow(UnauthorizedException);
   });
 
   // =======================
@@ -149,7 +152,7 @@ describe('AuthService', () => {
       role: 'USER',
     });
 
-    const result = await service.refreshToken('signed-jwt');
+    const result = await service.refreshToken({ refreshToken: 'signed-jwt' });
 
     expect(result).toEqual({ access_token: 'signed-jwt' });
   });
@@ -157,9 +160,9 @@ describe('AuthService', () => {
   it('should throw UnauthorizedException if refresh token not found', async () => {
     mockPrisma.refreshToken.findUnique.mockResolvedValue(null);
 
-    await expect(service.refreshToken('invalid-token')).rejects.toThrow(
-      UnauthorizedException,
-    );
+    await expect(
+      service.refreshToken({ refreshToken: 'invalid-token' }),
+    ).rejects.toThrow(UnauthorizedException);
   });
 
   // =======================
@@ -211,18 +214,28 @@ describe('AuthService', () => {
     mockPrisma.user.findUnique.mockResolvedValue({ id: '1', password: hashed });
     mockPrisma.user.update.mockResolvedValue({ id: '1' });
 
-    const result = await service.updatePassword('1', 'oldPass', 'newPass');
+    const result = await service.updatePassword('1', {
+      oldPassword: 'oldPass',
+      newPassword: 'newPass',
+    });
 
     expect(result).toEqual({ message: 'Password updated successfully' });
   });
 
   it('should throw BadRequestException if old password is wrong', async () => {
+    // hash pentru parola curentă
     const hashed = await bcrypt.hash('oldPass', 10);
+
+    // mock pentru findUnique returnând utilizator cu parola hashed
     mockPrisma.user.findUnique.mockResolvedValue({ id: '1', password: hashed });
 
+    // verificăm că updatePassword aruncă UnauthorizedException
     await expect(
-      service.updatePassword('1', 'wrongPass', 'newPass'),
-    ).rejects.toThrow(BadRequestException);
+      service.updatePassword('1', {
+        oldPassword: 'wrongPass',
+        newPassword: 'newPass',
+      }),
+    ).rejects.toThrow(UnauthorizedException); // <- aici nu mai există linie ruptă greșită
   });
 
   // =======================
@@ -239,9 +252,11 @@ describe('AuthService', () => {
       .spyOn(service as any, 'sendEmail')
       .mockResolvedValue(undefined);
 
-    const result = await service.forgotPassword('john@test.com');
+    const result = await service.forgotPassword({ email: 'john@test.com' });
 
-    expect(result).toEqual({ message: 'Password reset email sent' });
+    expect(result).toEqual({
+      message: 'If that email is registered, a reset link was sent.',
+    });
     expect(sendEmailSpy).toHaveBeenCalledWith(
       'john@test.com',
       expect.any(String),
@@ -252,9 +267,9 @@ describe('AuthService', () => {
   it('should throw NotFoundException if email not found', async () => {
     mockPrisma.user.findUnique.mockResolvedValue(null);
 
-    await expect(service.forgotPassword('notfound@test.com')).rejects.toThrow(
-      NotFoundException,
-    );
+    await expect(
+      service.forgotPassword({ email: 'notfound@test.com' }),
+    ).rejects.toThrow(NotFoundException);
   });
 
   // =======================
@@ -264,7 +279,10 @@ describe('AuthService', () => {
     mockJwt.verify.mockReturnValue({ sub: '1' });
     mockPrisma.user.update.mockResolvedValue({ id: '1' });
 
-    const result = await service.resetPassword('valid-token', 'newPass');
+    const result = await service.resetPassword({
+      token: 'valid-token',
+      newPassword: 'newPass',
+    });
 
     expect(result).toEqual({ message: 'Password reset successfully' });
   });
@@ -274,8 +292,8 @@ describe('AuthService', () => {
       throw new Error('Invalid');
     });
 
-    await expect(service.resetPassword('bad-token', 'newPass')).rejects.toThrow(
-      BadRequestException,
-    );
+    await expect(
+      service.resetPassword({ token: 'bad-token', newPassword: 'newPass' }),
+    ).rejects.toThrow(BadRequestException); // <- aici închizi expect-ul
   });
 });

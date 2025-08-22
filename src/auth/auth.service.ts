@@ -1,271 +1,356 @@
+// Importăm decoratori și clase utile din NestJS
 import {
-  Injectable, // Decorator to mark this class as injectable in NestJS
-  UnauthorizedException, // Exception for 401 responses
-  NotFoundException, // Exception for 404 responses
-  BadRequestException, // Exception for 400 responses
-  Logger, // Logger class provided by NestJS
+  Injectable, // Marchează clasa ca un serviciu ce poate fi injectat
+  UnauthorizedException, // Aruncată pentru erori de autentificare
+  NotFoundException, // Aruncată dacă un resource (ex: user) nu există
+  BadRequestException, // Aruncată pentru request invalid
+  Logger, // Util pentru log-uri
 } from '@nestjs/common';
-import { PrismaService } from '../prisma/prisma.service'; // Prisma DB service
-import * as bcrypt from 'bcrypt'; // Library to hash and compare passwords
-import { JwtService } from '@nestjs/jwt'; // JWT handling service
-import * as sgMail from '@sendgrid/mail'; // SendGrid mail service
 
-// ======================
-// Interfaces
-// ======================
-export interface AuthTokens {
-  access_token: string; // JWT access token
-  refresh_token: string; // JWT refresh token
-}
+// Importăm PrismaService pentru acces la baza de date
+import { PrismaService } from '../prisma/prisma.service';
 
-export interface AuthUser {
-  id: string; // User ID
-  name: string; // User name
-  email: string; // User email
-  role: 'USER' | 'ADMIN'; // User role
-}
+// Importăm bcrypt pentru hashing și verificare parole
+import * as bcrypt from 'bcrypt';
 
-@Injectable() // Marks this class as NestJS service
+// Importăm JwtService pentru generare și verificare token-uri JWT
+import { JwtService } from '@nestjs/jwt';
+
+// Importăm librăria SendGrid pentru trimitere email-uri
+import * as sgMail from '@sendgrid/mail';
+
+// DTO-uri (Data Transfer Objects) folosite pentru request/response
+import { AuthResponseDto } from './dto/auth-response.dto';
+import { AuthUserDto } from './dto/auth-user.dto';
+import { Role } from '@prisma/client';
+import { RegisterDto } from './dto/register.dto';
+import { LoginDto } from './dto/login.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
+import { UpdatePasswordDto } from './dto/update-password.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+
+// Declarăm clasa ca fiind un serviciu injectabil
+@Injectable()
 export class AuthService {
-  private readonly logger = new Logger(AuthService.name); // Logger instance
+  // Logger pentru mesaje din serviciu
+  private readonly logger = new Logger(AuthService.name);
 
+  // Injectăm PrismaService și JwtService prin constructor
   constructor(
-    private readonly prisma: PrismaService, // Inject Prisma DB service
-    private readonly jwtService: JwtService, // Inject JWT service
+    private readonly prisma: PrismaService, // pentru acces DB
+    private readonly jwtService: JwtService, // pentru token-uri JWT
   ) {
-    // Set SendGrid API key safely
+    // Citim API key-ul pentru SendGrid din variabilele de mediu
     const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
-    if (!SENDGRID_API_KEY) {
-      throw new Error('SENDGRID_API_KEY is not defined'); // Throw if missing
-    }
-    sgMail.setApiKey(SENDGRID_API_KEY); // Initialize SendGrid
+
+    // Dacă nu există, aruncăm eroare
+    if (!SENDGRID_API_KEY) throw new Error('SENDGRID_API_KEY is not defined');
+
+    // Configurăm SendGrid cu cheia citită
+    sgMail.setApiKey(SENDGRID_API_KEY);
   }
 
-  // ======================
-  // Send email using SendGrid
-  // ======================
+  // ============================================================
+  // Helper: Transformă un obiect User (din Prisma) într-un DTO
+  // ============================================================
+  private toAuthUserDto(user: {
+    id: string;
+    name: string;
+    email: string;
+    role: Role;
+    accountType: 'INDIVIDUAL' | 'COMPANY';
+    companyName?: string | null;
+    vatNumber?: string | null;
+    address?: string | null;
+    phone?: string | null;
+  }): AuthUserDto {
+    return {
+      id: user.id, // ID user
+      name: user.name, // Nume
+      email: user.email, // Email
+      role: user.role === 'ADMIN' ? 'ADMIN' : 'USER', // Rol mapat
+      accountType: user.accountType, // Tip cont
+      companyName: user.companyName ?? undefined, // Company name dacă există
+      vatNumber: user.vatNumber ?? undefined, // VAT number dacă există
+      address: user.address ?? undefined, // Adresă
+      phone: user.phone ?? undefined, // Telefon
+    };
+  }
+
+  // ============================================================
+  // Helper: Trimitere email prin SendGrid
+  // ============================================================
   private async sendEmail(
-    to: string,
-    subject: string,
-    html: string,
+    to: string, // Destinatar
+    subject: string, // Subiect email
+    html: string, // Conținut HTML
   ): Promise<void> {
     const mailData = {
-      to,
-      from: process.env.EMAIL_FROM ?? '', // Fallback to empty string if not defined
-      subject,
-      html,
+      to, // Email destinatar
+      from: process.env.EMAIL_FROM ?? '', // Expeditor (din env)
+      subject, // Subiect
+      html, // Conținut HTML
     };
-
     try {
-      await sgMail.send(mailData); // Send email
+      await sgMail.send(mailData); // Trimite email
     } catch (error: unknown) {
+      // Logăm eroarea pentru debugging
       this.logger.error(
         'SendGrid email error',
-        error instanceof Error ? error.stack : String(error), // Log error stack
+        error instanceof Error ? error.stack : String(error),
       );
-      throw new BadRequestException('Failed to send email'); // Throw user-friendly error
+      // Aruncăm excepție dacă emailul nu s-a trimis
+      throw new BadRequestException('Failed to send email');
     }
   }
 
-  // ======================
-  // Register a new user
-  // ======================
+  // ============================================================
+  // Register - Înregistrare user nou
+  // ============================================================
   async register(
-    name: string,
-    email: string,
-    password: string,
-  ): Promise<{ user: AuthUser } & AuthTokens> {
-    const hashedPassword = await bcrypt.hash(password, 10); // Hash password
+    dto: RegisterDto, // DTO cu datele de înregistrare
+  ): Promise<AuthResponseDto & { refresh_token: string }> {
+    // Verificăm dacă email-ul există deja în DB
     const existingUser = await this.prisma.user.findUnique({
-      where: { email },
+      where: { email: dto.email },
     });
-    if (existingUser) {
-      throw new BadRequestException('Email already registered');
-    }
+    if (existingUser) throw new BadRequestException('Email already registered');
+
+    // Facem hash la parolă
+    const hashedPassword = await bcrypt.hash(dto.password, 10);
+
+    // Creăm user în baza de date
     const user = await this.prisma.user.create({
-      data: { name, email, password: hashedPassword }, // Create user in DB
+      data: {
+        name: dto.name,
+        email: dto.email,
+        password: hashedPassword,
+        accountType: dto.accountType,
+        companyName: dto.companyName ?? null,
+        vatNumber: dto.vatNumber ?? null,
+        address: dto.address ?? null,
+        phone: dto.phone ?? null,
+      },
     });
 
-    const payload = { sub: user.id, email: user.email, role: user.role }; // JWT payload
-    const access_token = this.jwtService.sign(payload, { expiresIn: '15m' }); // Access token 15 min
-    const refresh_token = this.jwtService.sign(payload, { expiresIn: '7d' }); // Refresh token 7 days
+    // Pregătim payload pentru JWT
+    const payload = { sub: user.id, email: user.email, role: user.role };
 
+    // Generăm access și refresh token-uri
+    const access_token = this.jwtService.sign(payload, { expiresIn: '15m' });
+    const refresh_token = this.jwtService.sign(payload, { expiresIn: '7d' });
+
+    // Salvăm refresh token în DB
     await this.prisma.refreshToken.create({
       data: {
         token: refresh_token,
         userId: user.id,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days expiry
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // expiră în 7 zile
       },
     });
 
-    return { user, access_token, refresh_token }; // Return user and tokens
+    // Returnăm user + token-uri
+    return { user: this.toAuthUserDto(user), access_token, refresh_token };
   }
 
-  // ======================
-  // Login user
-  // ======================
+  // ============================================================
+  // Login - Autentificare user existent
+  // ============================================================
   async login(
-    email: string,
-    password: string,
-  ): Promise<{ user: AuthUser } & AuthTokens> {
-    const user = await this.prisma.user.findUnique({ where: { email } }); // Find user by email
-    if (!user) throw new UnauthorizedException('Invalid credentials'); // Throw if not found
+    dto: LoginDto, // DTO cu email și parolă
+  ): Promise<AuthResponseDto & { refresh_token: string }> {
+    // Căutăm user după email
+    const user = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+    });
+    if (!user) throw new UnauthorizedException('Invalid credentials');
 
-    const isMatch = await bcrypt.compare(password, user.password); // Compare passwords
-    if (!isMatch) throw new UnauthorizedException('Invalid credentials'); // Throw if mismatch
+    // Verificăm parola
+    const isMatch = await bcrypt.compare(dto.password, user.password);
+    if (!isMatch) throw new UnauthorizedException('Invalid credentials');
 
-    const payload = { sub: user.id, email: user.email, role: user.role }; // JWT payload
-    const access_token = this.jwtService.sign(payload, { expiresIn: '15m' }); // Access token
-    const refresh_token = this.jwtService.sign(payload, { expiresIn: '7d' }); // Refresh token
+    // Generăm token-uri
+    const payload = { sub: user.id, email: user.email, role: user.role };
+    const access_token = this.jwtService.sign(payload, { expiresIn: '15m' });
+    const refresh_token = this.jwtService.sign(payload, { expiresIn: '7d' });
 
+    // Salvăm refresh token în DB
     await this.prisma.refreshToken.create({
       data: {
         token: refresh_token,
         userId: user.id,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days expiry
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });
 
-    return { user, access_token, refresh_token }; // Return user and tokens
+    return { user: this.toAuthUserDto(user), access_token, refresh_token };
   }
 
-  // ======================
-  // Logout user
-  // ======================
+  // ============================================================
+  // Logout - Șterge refresh token din DB
+  // ============================================================
   async logout(
-    userId: string,
-    refreshToken: string,
+    userId: string, // ID user
+    refreshToken: string, // Refresh token
   ): Promise<{ message: string }> {
+    // Ștergem token-ul din DB
     await this.prisma.refreshToken.deleteMany({
-      where: { userId, token: refreshToken }, // Delete specific refresh token
+      where: { userId, token: refreshToken },
     });
-    return { message: 'Logged out successfully' }; // Return success message
+    return { message: 'Logged out successfully' };
   }
 
-  // ======================
-  // Refresh access token
-  // ======================
-  async refreshToken(refreshToken: string): Promise<{ access_token: string }> {
+  // ============================================================
+  // Refresh token - Generează un nou access token
+  // ============================================================
+  async refreshToken(dto: RefreshTokenDto): Promise<{ access_token: string }> {
     try {
+      // Verificăm refresh token-ul primit
       const payload = this.jwtService.verify<{
         sub: string;
         email: string;
-        role: string;
-      }>(
-        refreshToken, // Verify refresh token
-      );
+        role: Role;
+      }>(dto.refreshToken);
 
+      // Căutăm token-ul în DB
       const tokenInDb = await this.prisma.refreshToken.findUnique({
-        where: { token: refreshToken }, // Check DB
+        where: { token: dto.refreshToken },
       });
-      if (!tokenInDb) throw new UnauthorizedException('Invalid refresh token'); // Token not found
+      if (!tokenInDb) throw new UnauthorizedException('Invalid refresh token');
 
+      // Căutăm user-ul
       const user = await this.prisma.user.findUnique({
         where: { id: payload.sub },
-      }); // Find user
-      if (!user) throw new UnauthorizedException('User not found'); // User not found
+      });
+      if (!user) throw new UnauthorizedException('User not found');
 
-      const newAccessToken = this.jwtService.sign(
-        { sub: user.id, email: user.email, role: user.role }, // New JWT payload
-        { expiresIn: '15m' }, // 15 min expiry
+      // Generăm un nou access token
+      const access_token = this.jwtService.sign(
+        { sub: user.id, email: user.email, role: user.role },
+        { expiresIn: '15m' },
       );
 
-      return { access_token: newAccessToken }; // Return new access token
+      return { access_token };
     } catch {
-      throw new UnauthorizedException('Invalid refresh token'); // Invalid token
+      throw new UnauthorizedException('Invalid refresh token');
     }
   }
 
-  // ======================
-  // Get user profile
-  // ======================
-  async getProfile(userId: string): Promise<AuthUser> {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } }); // Find user
-    if (!user) throw new NotFoundException('User not found'); // Throw if not found
-
-    return { id: user.id, name: user.name, email: user.email, role: user.role }; // Return profile
-  }
-
-  // ======================
-  // Update user profile
-  // ======================
-  async updateProfile(
-    userId: string,
-    data: { name?: string; email?: string },
-  ): Promise<AuthUser> {
-    const updateData: Partial<{ name: string; email: string }> = {}; // Prepare update object
-    if (data.name) updateData.name = data.name; // Update name if provided
-    if (data.email) updateData.email = data.email; // Update email if provided
-    console.log('updated data', updateData);
-    const user = await this.prisma.user.update({
-      where: { id: userId }, // Select user
-      data: updateData, // Update fields
+  // ============================================================
+  // Forgot password - Trimite email cu link resetare parolă
+  // ============================================================
+  async forgotPassword(dto: ForgotPasswordDto): Promise<{ message: string }> {
+    // Căutăm user după email
+    const user = await this.prisma.user.findUnique({
+      where: { email: dto.email },
     });
+    if (!user) throw new NotFoundException('User not found');
 
-    return { id: user.id, name: user.name, email: user.email, role: user.role }; // Return updated user
-  }
+    // Creăm token resetare valabil 1h
+    const token = this.jwtService.sign({ sub: user.id }, { expiresIn: '1h' });
 
-  // ======================
-  // Update password
-  // ======================
-  async updatePassword(
-    userId: string,
-    oldPassword: string,
-    newPassword: string,
-  ): Promise<{ message: string }> {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } }); // Find user
-    if (!user) throw new NotFoundException('User not found'); // Throw if missing
+    // Construim link pentru frontend
+    const resetLink = `${process.env.FRONTEND_URL}/reset-password?token=${token}`;
 
-    const isMatch = await bcrypt.compare(oldPassword, user.password); // Compare old password
-    if (!isMatch) throw new BadRequestException('Old password incorrect'); // Throw if mismatch
-
-    const hashed = await bcrypt.hash(newPassword, 10); // Hash new password
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { password: hashed }, // Update password in DB
-    });
-
-    return { message: 'Password updated successfully' }; // Return success
-  }
-
-  // ======================
-  // Forgot password (send reset email)
-  // ======================
-  async forgotPassword(email: string): Promise<{ message: string }> {
-    const user = await this.prisma.user.findUnique({ where: { email } }); // Find user
-    if (!user) throw new NotFoundException('User not found'); // Throw if missing
-
-    const token = this.jwtService.sign({ sub: user.id }, { expiresIn: '15m' }); // Generate reset token
-    const resetLink = `${process.env.FRONTEND_URL ?? 'http://localhost:3000'}/reset-password?token=${token}`; // Reset link
-
+    // Trimitem email
     await this.sendEmail(
       user.email,
       'Reset your password',
-      `<p>Click the link to reset your password: <a href="${resetLink}">Reset Password</a></p>`,
+      `<a href="${resetLink}">Reset Password</a>`,
     );
 
-    return { message: 'Password reset email sent' }; // Return success message
+    return { message: 'If that email is registered, a reset link was sent.' };
   }
 
-  // ======================
-  // Reset password
-  // ======================
-  async resetPassword(
-    token: string,
-    newPassword: string,
-  ): Promise<{ message: string }> {
+  // ============================================================
+  // Reset password - Setează parolă nouă pe baza token-ului
+  // ============================================================
+  async resetPassword(dto: ResetPasswordDto): Promise<{ message: string }> {
     try {
-      const payload = this.jwtService.verify<{ sub: string }>(token); // Verify token
-      const hashed = await bcrypt.hash(newPassword, 10); // Hash new password
+      // Verificăm token-ul
+      const payload = this.jwtService.verify<{ sub: string }>(dto.token);
 
+      // Facem hash la noua parolă
+      const hashedPassword = await bcrypt.hash(dto.newPassword, 10);
+
+      // Updatăm user-ul
       await this.prisma.user.update({
         where: { id: payload.sub },
-        data: { password: hashed }, // Update password
+        data: { password: hashedPassword },
       });
 
-      return { message: 'Password reset successfully' }; // Return success
+      return { message: 'Password reset successfully' };
     } catch {
-      throw new BadRequestException('Invalid or expired token'); // Invalid token
+      throw new BadRequestException('Invalid or expired token');
     }
+  }
+
+  // ============================================================
+  // Update password - User logat își schimbă parola
+  // ============================================================
+  async updatePassword(
+    userId: string, // ID-ul user-ului
+    dto: UpdatePasswordDto, // DTO cu parole
+  ): Promise<{ message: string }> {
+    // Căutăm user-ul
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    // Verificăm parola veche
+    const isMatch = await bcrypt.compare(dto.oldPassword, user.password);
+    if (!isMatch) throw new UnauthorizedException('Old password is incorrect');
+
+    // Facem hash la noua parolă
+    const hashedPassword = await bcrypt.hash(dto.newPassword, 10);
+
+    // Updatăm parola
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { password: hashedPassword },
+    });
+
+    return { message: 'Password updated successfully' };
+  }
+
+  // ============================================================
+  // Get profile - Returnează profilul user-ului logat
+  // ============================================================
+  async getProfile(userId: string): Promise<AuthUserDto> {
+    // Căutăm user-ul în DB
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    // Dacă nu există, aruncăm excepție
+    if (!user) throw new NotFoundException('User not found');
+
+    // Returnăm user-ul ca DTO
+    return this.toAuthUserDto(user);
+  }
+
+  // ============================================================
+  // Update profile - Updatează datele user-ului
+  // ============================================================
+  async updateProfile(
+    userId: string, // ID-ul user-ului
+    dto: UpdateProfileDto, // DTO cu datele noi
+  ): Promise<AuthUserDto> {
+    // Updatăm user-ul în DB
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        name: dto.name,
+        email: dto.email,
+        companyName: dto.companyName,
+        vatNumber: dto.vatNumber,
+        address: dto.address,
+        phone: dto.phone,
+      },
+    });
+
+    // Returnăm user-ul updatat ca DTO
+    return this.toAuthUserDto(user);
   }
 }

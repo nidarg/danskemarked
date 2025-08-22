@@ -61,11 +61,18 @@ describe('AuthController', () => {
       name: 'John',
       email: 'john@test.com',
       password: 'pass123',
+      accountType: 'INDIVIDUAL',
     };
 
     // Spionăm metoda `register` din service și îi dăm un răspuns fake
     jest.spyOn(service, 'register').mockResolvedValueOnce({
-      user: { id: '1', name: 'John', email: 'john@test.com', role: 'USER' },
+      user: {
+        id: '1',
+        name: 'John',
+        email: 'john@test.com',
+        role: 'USER',
+        accountType: 'INDIVIDUAL',
+      },
       access_token: 'access',
       refresh_token: 'refresh',
     });
@@ -77,11 +84,12 @@ describe('AuthController', () => {
     expect(result.user.email).toBe('john@test.com');
     // Verificăm că service-ul a fost apelat cu parametrii corecți
     // eslint-disable-next-line @typescript-eslint/unbound-method
-    expect(service.register).toHaveBeenCalledWith(
-      'John',
-      'john@test.com',
-      'pass123',
-    );
+    expect(service.register).toHaveBeenCalledWith({
+      accountType: 'INDIVIDUAL',
+      email: 'john@test.com',
+      name: 'John',
+      password: 'pass123',
+    });
   });
 
   // ======================
@@ -91,7 +99,13 @@ describe('AuthController', () => {
     const dto: LoginDto = { email: 'john@test.com', password: 'pass123' };
 
     jest.spyOn(service, 'login').mockResolvedValueOnce({
-      user: { id: '1', name: 'John', email: 'john@test.com', role: 'USER' },
+      user: {
+        id: '1',
+        name: 'John',
+        email: 'john@test.com',
+        role: 'USER',
+        accountType: 'INDIVIDUAL',
+      },
       access_token: 'access',
       refresh_token: 'refresh',
     });
@@ -100,7 +114,10 @@ describe('AuthController', () => {
 
     expect(result.access_token).toBe('access');
     // eslint-disable-next-line @typescript-eslint/unbound-method
-    expect(service.login).toHaveBeenCalledWith('john@test.com', 'pass123');
+    expect(service.login).toHaveBeenCalledWith({
+      email: 'john@test.com',
+      password: 'pass123',
+    });
   });
 
   // ======================
@@ -117,7 +134,9 @@ describe('AuthController', () => {
 
     expect(result.access_token).toBe('newAccess');
     // eslint-disable-next-line @typescript-eslint/unbound-method
-    expect(service.refreshToken).toHaveBeenCalledWith('refresh123');
+    expect(service.refreshToken).toHaveBeenCalledWith({
+      refreshToken: 'refresh123',
+    });
   });
 
   // ======================
@@ -142,13 +161,14 @@ describe('AuthController', () => {
   // PROFILE
   // ======================
   it('should return profile', async () => {
-    const req = { user: { sub: '1' } };
+    const req = { user: { userId: '1' } };
 
     jest.spyOn(service, 'getProfile').mockResolvedValueOnce({
       id: '1',
       name: 'John',
       email: 'john@test.com',
       role: 'USER',
+      accountType: 'INDIVIDUAL',
     });
 
     const result = await controller.profile(req);
@@ -162,7 +182,7 @@ describe('AuthController', () => {
   // UPDATE PROFILE
   // ======================
   it('should update profile', async () => {
-    const req = { user: { sub: '1' } };
+    const req = { user: { userId: '1' } };
     const dto: UpdateProfileDto = { name: 'Johnny', email: 'johnny@test.com' };
 
     jest.spyOn(service, 'updateProfile').mockResolvedValueOnce({
@@ -170,6 +190,7 @@ describe('AuthController', () => {
       name: 'Johnny',
       email: 'johnny@test.com',
       role: 'USER',
+      accountType: 'INDIVIDUAL',
     });
 
     const result = await controller.updateProfile(req, dto);
@@ -183,7 +204,7 @@ describe('AuthController', () => {
   // UPDATE PASSWORD
   // ======================
   it('should update password', async () => {
-    const req = { user: { sub: '1' } };
+    const req = { user: { userId: '1' } };
     const dto: UpdatePasswordDto = {
       oldPassword: 'oldPass',
       newPassword: 'newPass',
@@ -197,11 +218,10 @@ describe('AuthController', () => {
 
     expect(result.message).toBe('Password updated successfully');
     // eslint-disable-next-line @typescript-eslint/unbound-method
-    expect(service.updatePassword).toHaveBeenCalledWith(
-      '1',
-      'oldPass',
-      'newPass',
-    );
+    expect(service.updatePassword).toHaveBeenCalledWith('1', {
+      newPassword: 'newPass',
+      oldPassword: 'oldPass',
+    });
   });
 
   // ======================
@@ -218,7 +238,9 @@ describe('AuthController', () => {
 
     expect(result.message).toBe('Password reset email sent');
     // eslint-disable-next-line @typescript-eslint/unbound-method
-    expect(service.forgotPassword).toHaveBeenCalledWith('john@test.com');
+    expect(service.forgotPassword).toHaveBeenCalledWith({
+      email: 'john@test.com',
+    });
   });
 
   // ======================
@@ -238,6 +260,9 @@ describe('AuthController', () => {
 
     expect(result.message).toBe('Password reset successfully');
     // eslint-disable-next-line @typescript-eslint/unbound-method
-    expect(service.resetPassword).toHaveBeenCalledWith('resetToken', 'newPass');
+    expect(service.resetPassword).toHaveBeenCalledWith({
+      newPassword: 'newPass',
+      token: 'resetToken',
+    });
   });
 });
